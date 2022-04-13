@@ -89,9 +89,10 @@ def one_user(id):
     
         try:
     
-            db.update_one({'_id':ObjectId(id)}, {'$set': {
+            db.users.update_one({'_id':ObjectId(id)}, {'$set': {
                 'name':request.json['name'],
-                'email':request.json['email']
+                'email':request.json['email'],
+                'phone':request.json['phone'],
             }})
             return jsonify({'Message':"User Updated"})
     
@@ -101,12 +102,14 @@ def one_user(id):
     elif request.method == "GET":
     
         try:
-    
-            user = db.find_one({'_id':ObjectId(id)})
+            print
+            user = db.users.find_one({'_id':ObjectId(id)})
     
             return jsonify({
                 '_id':str(ObjectId(user['_id'])),
-                'name':user['name']
+                'name':user['name'],
+                'email':user['email'],
+                'phone':user['phone']
             })
     
         except Exception as ex:
@@ -115,7 +118,7 @@ def one_user(id):
     elif request.method == "DELETE":
     
         try:
-            db.delete_one({'_id':ObjectId(id)})
+            db.users.delete_one({'_id':ObjectId(id)})
             return jsonify({'Message':"User Deleted"})
     
         except Exception as ex:
@@ -194,9 +197,8 @@ def user_login():
                 email = request.form['email']
                 # print(email)
                 user = db.users.find_one({"email" : email})
-                print(user)
                 if(user is None):
-                    return jsonify({"data":"profile not found"})
+                    return jsonify({"data":"email not found"})
                 db_pic = face_recognition.load_image_file(user['image'])
                 db_pic_encode = face_recognition.face_encodings(db_pic)[0]
     
@@ -222,14 +224,14 @@ def user_login():
                 return jsonify({"data" : "no face found"})
 
             results = face_recognition.compare_faces([db_pic_encode], current_pic_encode)
-
+            print(user['_id'])
             if results[0] == True:
-                return jsonify({"data": "face matched","userinfo":user["name"]})
+                return dumps(user)
             else:
                 return jsonify({"data": "face not matched"})
 
             return jsonify({"data":filename})
-        return jsonify({"data": "method not allowed000000000000"})
+        return jsonify({"data": "something went wrong"})
     return jsonify({"data": "method not allowed"})
 
 ########################################################
