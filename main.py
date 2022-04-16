@@ -89,15 +89,19 @@ def one_user(id):
     
         try:
     
-            db.users.update_one({'_id':ObjectId(id)}, {'$set': {
+            data= db.users.update_one({'_id':ObjectId(id)}, {'$set': {
                 'name':request.json['name'],
                 'email':request.json['email'],
                 'phone':request.json['phone'],
                 'password':request.json['password'],
             }})
+
+            print(request.json, id)
+            print(data)
             return jsonify({'Message':"User Updated"})
     
         except Exception as ex:
+            print(ex)
             return jsonify({'Message':"Something went wrong"})
     
     elif request.method == "GET":
@@ -244,10 +248,14 @@ def company():
     if request.method == "POST":
     
         try:
-            result = db.company.companies.insert_one(request.json)
-            return jsonify({'msg': 'data inserted'})
+            new_org = { 'email': request.form['email'], 'web': request.form['web'], 'name': request.form['name'] }
+            result = db.companies.insert_one(new_org)
+            # result = db.companies.insert_one(request.json)
+            company = db.companies.find_one({'email': request.form['email']})
+            return dumps(company)
     
         except Exception as ex:
+            print(ex)
             return jsonify({'Message':"Something went wrong"})
     
     elif request.method == "GET":
@@ -271,7 +279,8 @@ def onecompany(id):
     
             db.company.update_one({'_id':ObjectId(id)}, {'$set': {
                 'name':request.json['name'],
-                'email':request.json['email']
+                'email':request.json['email'],
+                'web':request.json['web'],
             }})
             return jsonify({'Message':"User Updated"})
     
