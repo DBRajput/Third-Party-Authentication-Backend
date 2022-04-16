@@ -55,7 +55,7 @@ def users():
                 check_face_encoding = face_recognition.face_encodings(check_face)[0]
                 email = request.form['email']
                 image = "./static/uploads/" + filename
-                new_user = { 'name': request.form['name'], 'email': request.form['email'], 'phone': request.form['phone'], "image":image }
+                new_user = { 'name': request.form['name'], 'email': request.form['email'], 'phone': request.form['phone'],'password': request.form['password'], "image":image }
                 result = db.users.insert_one(new_user)
             
             except Exception as ex:
@@ -93,6 +93,7 @@ def one_user(id):
                 'name':request.json['name'],
                 'email':request.json['email'],
                 'phone':request.json['phone'],
+                'password':request.json['password'],
             }})
             return jsonify({'Message':"User Updated"})
     
@@ -109,7 +110,8 @@ def one_user(id):
                 '_id':str(ObjectId(user['_id'])),
                 'name':user['name'],
                 'email':user['email'],
-                'phone':user['phone']
+                'phone':user['phone'],
+                'password':user['password'],
             })
     
         except Exception as ex:
