@@ -8,13 +8,48 @@ from werkzeug.utils import secure_filename
 import os
 import face_recognition
 from flask_cors import CORS
+import random
+import datetime
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_expects_json import expects_json
+#from flask_mail import Mail
+from flask_mail import Message, Mail
 
+
+#with open('config.json', 'r') as c:
+    #params = json.load(c)["params"]
 app = Flask(__name__)
+app.config['MAIL_SERVER']='smtp.mailtrap.io'
+app.config['MAIL_PORT'] = 2525
+app.config['MAIL_USERNAME'] = 'f8c8af91c81f94'
+app.config['MAIL_PASSWORD'] = 'e89b08b34fb4d6'
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
+mail = Mail(app)
+
 CORS(app)
 app.secret_key = "secret key"
 app.config['MONGO_URI'] = "mongodb://localhost:27017/face_auth"
 mongo = PyMongo(app)
 db = mongo.db
+
+# flask rate limiter
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["2 per minute", "1 per second"],
+)
+
+company_schema = {
+    'type': 'object',
+    'properties': {
+        'name': {'type': 'string'},
+        'email': {'type': 'string'},
+        'phone': {'type': 'number'}
+    },
+    'required': ['email', 'phone']
+}
 
 UPLOAD_FOLDER = '/Users/Hero/Documents/Projects/Dev/Third-Party-Auth-Backend/static/uploads'
 TEMP_FOLDER = '/Users/Hero/Documents/Projects/Dev/Third-Party-Auth-Backend/static/temp_uploads'
@@ -24,7 +59,18 @@ ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['TEMP_FOLDER'] = TEMP_FOLDER
 
+class MongoAPI:
+    def __init__(self, data):
+        self.client = MongoClient("mongodb://localhost:27017/")  
+      
+        database = data['face_auth']
+        collection = data['users']
+        cursor = self.client[database]
+        self.collection = cursor[collection]
+        self.data = data
+
 @app.route("/user",methods=["GET", "POST"])
+@limiter.limit("10 per minute")
 def users():
     
     if request.method == "POST":
@@ -53,13 +99,14 @@ def users():
 
                 check_face = face_recognition.load_image_file("./static/uploads/" + filename)
                 check_face_encoding = face_recognition.face_encodings(check_face)[0]
+                print(check_face_encoding)
                 email = request.form['email']
                 image = "./static/uploads/" + filename
-                new_user = { 'name': request.form['name'], 'email': request.form['email'], 'phone': request.form['phone'],'password': request.form['password'], "image":image }
+                new_user = { 'name': request.form['name'], 'email': request.form['email'], 'phone': request.form['phone'], 'password': request.form['password'], "image":image, 'createdAt': datetime.datetime.now(), 'updatedAt' : datetime.datetime.now() }
                 result = db.users.insert_one(new_user)
-            
+                print(datetime.datetime.now())
             except Exception as ex:
-
+                
                 # removing file from uploads folder
                 pic_path = os.path.exists("./static/uploads/" + filename)
                 if pic_path:
@@ -74,7 +121,7 @@ def users():
     
         try:
     
-            data =list(db.find())
+            data =list(db.users.find())
             for user in data:
                 user["_id"]= str(ObjectId(user["_id"]))
             return jsonify(data)
@@ -83,19 +130,21 @@ def users():
             return jsonify({'Message':"Something went wrong"})
 
 @app.route("/user/<id>",methods=["GET", "PUT", "DELETE"])
+@limiter.limit("10 per minute")
 def one_user(id):
     
     if request.method == "PUT":
     
         try:
     
-            data= db.users.update_one({'_id':ObjectId(id)}, {'$set': {
+            data = db.users.update_one({'_id':ObjectId(id)}, {'$set': {
                 'name':request.json['name'],
                 'email':request.json['email'],
                 'phone':request.json['phone'],
                 'password':request.json['password'],
+                'updatedAt' : datetime.datetime.now()
             }})
-
+            print(datetime.datetime.now())
             print(request.json, id)
             print(data)
             return jsonify({'Message':"User Updated"})
@@ -116,6 +165,8 @@ def one_user(id):
                 'email':user['email'],
                 'phone':user['phone'],
                 'password':user['password'],
+                'image': 'http://localhost:5000' + user['image'].split('.')[1] + '.' +user['image'].split('.')[2],
+                'createdAt': user['createdAt']
             })
     
         except Exception as ex:
@@ -176,8 +227,57 @@ def upload_file():
     
     return jsonify({"data": "method not allowed"})
 
+############################### User Login backend   ########################################
+
+@app.route("/login-req", methods=["POST"])
+@limiter.limit("10 per minute")
+def login_request():
+    email = request.json['email']
+    user = db.users.find_one({"email":email})
+    if(user is None):
+        return jsonify({"message":"email not found"})
+    token = random.randint(1111,9999)
+    update_user = db.users.update_one({'email':email}, { '$set': { 'token' : token, 'updatedAt' : datetime.datetime.now() }})
+    print(update_user)
+    
+    company_id = request.json['organization']
+    company = db.companies.find_one({'_id': ObjectId(company_id)})
+
+    if(company is None):
+        return jsonify({"message": "no organization found"})
+
+    history = {
+                'user_id' : str(user['_id']),
+                'company_id':str(company['_id']),
+                'name' : company['name'],
+                'email' : company['email'],
+                'phone' : company['phone'],
+                'token' : token,
+                'time' : datetime.datetime.now()
+            }
+
+    db.history.insert_one(history)
+   # mail.send_message('New message from third party auth ',
+    #                      sender=email,
+     #                     recipients = ["tnikumb@gmail.com"],
+      #                    body = token
+       #                   )
+    msg = Message("Hello",
+                  sender="from@example.com",
+                  recipients=["to@example.com"],
+                  body = f"your one time token {token}."
+ )
+                  
+    mail.send(msg)              
+
+    return jsonify(token)
+    
+def timeDifference(time1, time2):
+    diff = time1 - time2
+    return diff.total_seconds() / 60
 
 @app.route("/login", methods=["POST"])
+@limiter.limit("10 per minute")
 def user_login():
     
     if request.method == 'POST':
@@ -195,16 +295,28 @@ def user_login():
             filename = secure_filename(file.filename)
             file.save(os.path.join(app.config['TEMP_FOLDER'], filename))
 
-            # db query user email, image
-            # face reco
-            # companies
-
             try:
                 email = request.form['email']
-                # print(email)
+                token = request.form['token']
+                
                 user = db.users.find_one({"email" : email})
+                
+                updatedAt = user['updatedAt']
+                print(updatedAt)
+
+                diff = int(timeDifference(datetime.datetime.now() ,updatedAt))
+                if(diff > 30):
+                    return jsonify({"message" : "generate new token"})
+
+                # checking user exists
                 if(user is None):
                     return jsonify({"data":"email not found"})
+                
+                # checking token is same or not
+                if( int(token) != user['token']):
+                    return jsonify({"message": "token not matched"})
+                
+                # doing ml in db pic    
                 db_pic = face_recognition.load_image_file(user['image'])
                 db_pic_encode = face_recognition.face_encodings(db_pic)[0]
     
@@ -230,9 +342,16 @@ def user_login():
                 return jsonify({"data" : "no face found"})
 
             results = face_recognition.compare_faces([db_pic_encode], current_pic_encode)
-            print(user['_id'])
+            
             if results[0] == True:
-                return dumps(user)
+                return jsonify({
+                    'company_id':str(ObjectId(user['_id'])),
+                    'name':user['name'],
+                    'email':user['email'],
+                    'phone':user['phone'],
+                    'image': 'http://localhost:5000' + user['image'].split('.')[1] + '.' +user['image'].split('.')[2],
+                    'createdAt': user['createdAt']
+                })
             else:
                 return jsonify({"data": "face not matched"})
 
@@ -240,9 +359,11 @@ def user_login():
         return jsonify({"data": "something went wrong"})
     return jsonify({"data": "method not allowed"})
 
-########################################################
+########################## Company Backend ##############################
 
 @app.route("/company",methods=["GET", "POST"])
+@limiter.limit("10 per minute")
+# @expects_json(company_schema)
 def company():
     
     if request.method == "POST":
@@ -271,6 +392,7 @@ def company():
             return jsonify({'Message':"Something went wrong"})
 
 @app.route("/company/<id>",methods=["GET", "PUT", "DELETE"])
+@limiter.limit("10 per minute")
 def onecompany(id):
     
     if request.method == "PUT":
@@ -309,6 +431,35 @@ def onecompany(id):
     
         except Exception as ex:
             return jsonify({'Message':"Something went wrong"})
+
+############################### User Login History #######################
+
+@app.route('/history/<id>', methods=["GET"])
+@limiter.limit("10 per minute")
+def login_history(id):
+    try:
+
+        history =list(db.history.find({'user_id' : id}))
+        for data in history:
+            data["_id"]= str(ObjectId(data["_id"]))
+        return jsonify(history)        
+
+    except Exception as ex:
+        return jsonify({"error": ex})
+
+@app.route('/history/<id>', methods=["DELETE"])
+@limiter.limit("10 per minute")
+def delete_history(id):
+    if request.method == "DELETE":
+
+        try:
+            
+            db.history.delete_many({'user_id': id})
+            return jsonify({"message": "all history deleted"})        
+
+        except Exception as ex:
+            return jsonify({"error": ex})
+    return jsonify({"message" : "method not allowed"})
 
 if __name__ == '__main__':
     app.run(debug=True)
