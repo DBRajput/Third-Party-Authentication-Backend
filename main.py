@@ -38,7 +38,7 @@ db = mongo.db
 limiter = Limiter(
     app,
     key_func=get_remote_address,
-    default_limits=["2 per minute", "1 per second"],
+    default_limits=["200 per minute", "1000 per second"],
 )
 
 company_schema = {
@@ -70,7 +70,7 @@ class MongoAPI:
         self.data = data
 
 @app.route("/user",methods=["GET", "POST"])
-@limiter.limit("10 per minute")
+@limiter.limit("100 per minute")
 def users():
     
     if request.method == "POST":
@@ -88,7 +88,6 @@ def users():
             
             filename = secure_filename(file.filename)
             filename = request.form['email'].split("@")[0] + ".jpeg"
-            # filename = "monster"
             
             # uploading file
             
@@ -99,14 +98,14 @@ def users():
 
                 check_face = face_recognition.load_image_file("./static/uploads/" + filename)
                 check_face_encoding = face_recognition.face_encodings(check_face)[0]
-                print(check_face_encoding)
                 email = request.form['email']
+                password = request.form['password']
                 image = "./static/uploads/" + filename
-                new_user = { 'name': request.form['name'], 'email': request.form['email'], 'phone': request.form['phone'], 'password': request.form['password'], "image":image, 'createdAt': datetime.datetime.now(), 'updatedAt' : datetime.datetime.now() }
+                new_user = { 'name': request.form['name'], 'email': email, 'password' : password , 'phone': request.form['phone'], "image":image, 'createdAt': datetime.datetime.now(), 'updatedAt' : datetime.datetime.now() }
                 result = db.users.insert_one(new_user)
-                print(datetime.datetime.now())
+            
             except Exception as ex:
-                
+
                 # removing file from uploads folder
                 pic_path = os.path.exists("./static/uploads/" + filename)
                 if pic_path:
@@ -130,7 +129,7 @@ def users():
             return jsonify({'Message':"Something went wrong"})
 
 @app.route("/user/<id>",methods=["GET", "PUT", "DELETE"])
-@limiter.limit("10 per minute")
+@limiter.limit("1000 per minute")
 def one_user(id):
     
     if request.method == "PUT":
@@ -144,7 +143,7 @@ def one_user(id):
                 'password':request.json['password'],
                 'updatedAt' : datetime.datetime.now()
             }})
-            print(datetime.datetime.now())
+
             print(request.json, id)
             print(data)
             return jsonify({'Message':"User Updated"})
@@ -230,7 +229,7 @@ def upload_file():
 ############################### User Login backend   ########################################
 
 @app.route("/login-req", methods=["POST"])
-@limiter.limit("10 per minute")
+@limiter.limit("100 per minute")
 def login_request():
     email = request.json['email']
     user = db.users.find_one({"email":email})
@@ -257,18 +256,6 @@ def login_request():
             }
 
     db.history.insert_one(history)
-   # mail.send_message('New message from third party auth ',
-    #                      sender=email,
-     #                     recipients = ["tnikumb@gmail.com"],
-      #                    body = token
-       #                   )
-    msg = Message("Hello",
-                  sender="from@example.com",
-                  recipients=["to@example.com"],
-                  body = f"your one time token {token}."
- )
-                  
-    mail.send(msg)              
 
     return jsonify(token)
     
@@ -277,7 +264,7 @@ def timeDifference(time1, time2):
     return diff.total_seconds() / 60
 
 @app.route("/login", methods=["POST"])
-@limiter.limit("10 per minute")
+@limiter.limit("100 per minute")
 def user_login():
     
     if request.method == 'POST':
@@ -295,28 +282,18 @@ def user_login():
             filename = secure_filename(file.filename)
             file.save(os.path.join(app.config['TEMP_FOLDER'], filename))
 
+            # db query user email, image
+            # face reco
+            # companies
+
             try:
                 email = request.form['email']
                 token = request.form['token']
+                print(email + " " + token)
                 
                 user = db.users.find_one({"email" : email})
-                
-                updatedAt = user['updatedAt']
-                print(updatedAt)
-
-                diff = int(timeDifference(datetime.datetime.now() ,updatedAt))
-                if(diff > 30):
-                    return jsonify({"message" : "generate new token"})
-
-                # checking user exists
                 if(user is None):
                     return jsonify({"data":"email not found"})
-                
-                # checking token is same or not
-                if( int(token) != user['token']):
-                    return jsonify({"message": "token not matched"})
-                
-                # doing ml in db pic    
                 db_pic = face_recognition.load_image_file(user['image'])
                 db_pic_encode = face_recognition.face_encodings(db_pic)[0]
     
@@ -342,16 +319,9 @@ def user_login():
                 return jsonify({"data" : "no face found"})
 
             results = face_recognition.compare_faces([db_pic_encode], current_pic_encode)
-            
+            print(user['_id'])
             if results[0] == True:
-                return jsonify({
-                    'company_id':str(ObjectId(user['_id'])),
-                    'name':user['name'],
-                    'email':user['email'],
-                    'phone':user['phone'],
-                    'image': 'http://localhost:5000' + user['image'].split('.')[1] + '.' +user['image'].split('.')[2],
-                    'createdAt': user['createdAt']
-                })
+                return dumps(user)
             else:
                 return jsonify({"data": "face not matched"})
 
@@ -359,25 +329,67 @@ def user_login():
         return jsonify({"data": "something went wrong"})
     return jsonify({"data": "method not allowed"})
 
+@app.route("/login-user", methods=["POST"])
+@limiter.limit("100 per minute")
+def user_login_dash():
+    
+    if request.method == 'POST':
+        
+        try:
+                email = request.json['email']
+                password = request.json['password']
+                
+                user = db.users.find_one({"email" : email})
+                
+                if user is None:
+                    return jsonify({"data" : "Email Not Found"})
+
+                if(user['password'] == password):
+                    print("user is corrent")
+                    return jsonify({
+                        'company_id':str(ObjectId(user['_id'])),
+                        'name':user['name'],
+                        'email':user['email'],
+                        'phone':user['phone'],
+                        'image': 'http://localhost:5000' + user['image'].split('.')[1] + '.' +user['image'].split('.')[2],
+                        'createdAt': user['createdAt']
+                    })
+                else:
+                    print("password is  not matched")
+                    return jsonify({"data" : "password not matched"})
+                
+        except Exception as ex:
+            print(ex)
+            return jsonify({"data" : "something went wrong"})
+
+    return jsonify({"data": "method not allowed"})    
+
 ########################## Company Backend ##############################
 
 @app.route("/company",methods=["GET", "POST"])
-@limiter.limit("10 per minute")
+@limiter.limit("100 per minute")
 # @expects_json(company_schema)
 def company():
     
     if request.method == "POST":
     
         try:
-            new_org = { 'email': request.form['email'], 'web': request.form['web'], 'name': request.form['name'] }
-            result = db.companies.insert_one(new_org)
-            # result = db.companies.insert_one(request.json)
-            company = db.companies.find_one({'email': request.form['email']})
-            return dumps(company)
+            name = request.json['name']
+            email = request.json['email']
+            phone = request.json['phone']
+            phone = int(phone)
+            
+            company = db.companies.find_one({'email': email})
+            if company:
+                return jsonify({'company_id':str(ObjectId(company['_id']))})        
+            
+            result = db.companies.insert_one({ 'name': name, 'email' : email, 'phone' : phone})
+            print(company)  
+            return jsonify({'company_id':str(ObjectId(company['_id']))})
     
         except Exception as ex:
             print(ex)
-            return jsonify({'Message':"Something went wrong"})
+            return jsonify({'data':"Something went wrong"})
     
     elif request.method == "GET":
     
@@ -389,10 +401,10 @@ def company():
             return jsonify(data)
     
         except Exception as ex:
-            return jsonify({'Message':"Something went wrong"})
+            return jsonify({'data':"Something went wrong"})
 
 @app.route("/company/<id>",methods=["GET", "PUT", "DELETE"])
-@limiter.limit("10 per minute")
+@limiter.limit("100 per minute")
 def onecompany(id):
     
     if request.method == "PUT":
@@ -404,10 +416,10 @@ def onecompany(id):
                 'email':request.json['email'],
                 'web':request.json['web'],
             }})
-            return jsonify({'Message':"User Updated"})
+            return jsonify({'data':"User Updated"})
     
         except Exception as ex:
-            return jsonify({'Message':"Something went wrong"})
+            return jsonify({'data':"Something went wrong"})
     
     elif request.method == "GET":
     
@@ -421,25 +433,26 @@ def onecompany(id):
             })
     
         except Exception as ex:
-            return jsonify({'Message':"Something went wrong"})
+            return jsonify({'data':"Something went wrong"})
     
     elif request.method == "DELETE":
     
         try:
             db.company.delete_one({'_id':ObjectId(id)})
-            return jsonify({'Message':"User Deleted"})
+            return jsonify({'data':"User Deleted"})
     
         except Exception as ex:
-            return jsonify({'Message':"Something went wrong"})
+            return jsonify({'data':"Something went wrong"})
 
 ############################### User Login History #######################
 
 @app.route('/history/<id>', methods=["GET"])
-@limiter.limit("10 per minute")
+@limiter.limit("100 per minute")
 def login_history(id):
     try:
 
-        history =list(db.history.find({'user_id' : id}))
+        # history =list(db.history.find({'user_id' : id}))
+        history =list(db.history.aggregate( [ { "$match" : { "user_id": id } }, { "$sort" : { "time" : -1 } } ] ) )
         for data in history:
             data["_id"]= str(ObjectId(data["_id"]))
         return jsonify(history)        
@@ -448,18 +461,18 @@ def login_history(id):
         return jsonify({"error": ex})
 
 @app.route('/history/<id>', methods=["DELETE"])
-@limiter.limit("10 per minute")
+@limiter.limit("100 per minute")
 def delete_history(id):
     if request.method == "DELETE":
 
         try:
             
             db.history.delete_many({'user_id': id})
-            return jsonify({"message": "all history deleted"})        
+            return jsonify({"data": "all history deleted"})        
 
         except Exception as ex:
             return jsonify({"error": ex})
-    return jsonify({"message" : "method not allowed"})
+    return jsonify({"data" : "method not allowed"})
 
 if __name__ == '__main__':
     app.run(debug=True)
